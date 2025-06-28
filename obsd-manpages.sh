@@ -25,7 +25,6 @@ DOCS_DIR="$HOME/.local/share/openbsd"
 BIN_DIR="$HOME/.local/bin"
 TEMP_DIR="/tmp/openbsd-man-$$"
 
-
 # Functions
 print_status() {
     echo -e "${BLUE}[INFO]${NC} $1"
@@ -74,30 +73,53 @@ check_dependencies() {
 
 extract_makepkg_var() {
     local var_name="$1"
-    sed -n "/^${var_name}=/{
-        # If the line ends with a quote, it's single-line
-        /\"$/{ p; b }
-        # Otherwise, it's multi-line - print from here to closing quote
-        :a
-        p
-        n
-        /^[^#]*\"$/{ p; b }
-        ba
-    }" /etc/makepkg.conf
+    if [[ -f /etc/makepkg.conf ]]; then
+        sed -n "/^${var_name}=/{
+            # If the line ends with a quote, it's single-line
+            /\"$/{ p; b }
+            # Otherwise, it's multi-line - print from here to closing quote
+            :a
+            p
+            n
+            /^[^#]*\"$/{ p; b }
+            ba
+        }" /etc/makepkg.conf
+    fi
 }
 
 get_makepkg_flags() {
+    # Extract CFLAGS and check exit code and output
     CFLAGS_LINES=$(extract_makepkg_var "CFLAGS")
+    cflags_status=$?
+    if [[ $cflags_status -ne 0 || -z "$CFLAGS_LINES" ]]; then
+        print_warning "Falling back to default CFLAGS"
+        CFLAGS_LINES='CFLAGS="-march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions \
+        -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security \
+        -fstack-clash-protection -fcf-protection \
+        -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer"'
+    fi
+
+    # Extract LDFLAGS and check exit code and output
     LDFLAGS_LINES=$(extract_makepkg_var "LDFLAGS")
+    ldflags_status=$?
+    if [[ $ldflags_status -ne 0 || -z "$LDFLAGS_LINES" ]]; then
+        print_warning "Falling back to default LDFLAGS"
+        LDFLAGS_LINES='LDFLAGS="-Wl,-O1 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now \
+        -Wl,-z,pack-relative-relocs"'
+    fi
 }
 
 create_directories() {
     print_status "Creating directories..."
 
+    if [[ -d "$DOCS_DIR" ]]; then
+        rm -rf "$DOCS_DIR"
+        print_status "Deleted existing $DOCS_DIR for clean install"
+    fi
+
     mkdir -p "$DOCS_DIR"
     mkdir -p "$BIN_DIR"
     mkdir -p "$TEMP_DIR"
-
 
     print_success "Directories created"
 }
@@ -154,7 +176,7 @@ build_mandoc() {
     ./configure
 
     print_status "Compiling mandoc..."
-    make -j$(nproc)
+    make -j"$(nproc)"
 
     # Copy binaries to ~/.local/bin
     print_status "Installing mandoc binaries to $BIN_DIR..."
@@ -254,8 +276,6 @@ EOF
     print_success "Created obsdapropos wrapper"
 }
 
-
-
 check_path() {
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
         print_warning "$BIN_DIR is not in your PATH"
@@ -273,7 +293,7 @@ check_path() {
 show_usage() {
     print_success "Installation completed successfully!"
     echo ""
-    #     print_status "Installed mandoc binaries:"
+    print_status "Installed mandoc binaries:"
     echo "  mandoc, man, soelim, mandocd, demandoc, catman"
     echo ""
 
@@ -292,7 +312,6 @@ show_usage() {
     echo "  ~/.local/bin/man 1 ls                         # Using custom man"
 }
 
-# Main execution
 main() {
     echo "OpenBSD ${OPENBSD_VERSION} Manpages + Mandoc Snapshot v${MANDOC_VERSION} Installer"
     echo "========================================================"
@@ -309,7 +328,6 @@ main() {
     show_usage
 }
 
-# Handle command line arguments
 case "${1:-}" in
 -h | --help)
     echo "Usage: $0 [OPTIONS]"
